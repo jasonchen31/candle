@@ -36,6 +36,43 @@ __device__ double atomicAdd(double* address, double val) {
 
 
 #if __CUDA_ARCH__ < 700
+// For GTX 1080 Ti (compute capability 6.1), replace __hmax_nan usage
+// Instead of: hmax = __half_as_ushort(__hmax_nan(val, __ushort_as_half(hmax)));
+// Use this pattern:
+
+__device__ __forceinline__ __half safe_hmax_nan(__half a, __half b) {
+    // Check for NaN in both values
+    unsigned short a_bits = __half_as_ushort(a);
+    unsigned short b_bits = __half_as_ushort(b);
+    
+    // NaN detection: exponent all 1s and mantissa non-zero
+    bool a_is_nan = ((a_bits & 0x7C00) == 0x7C00) && (a_bits & 0x03FF);
+    bool b_is_nan = ((b_bits & 0x7C00) == 0x7C00) && (b_bits & 0x03FF);
+    
+    if (a_is_nan) return a;
+    if (b_is_nan) return b;
+    
+    // Use regular comparison for non-NaN values
+    return __hgt(a, b) ? a : b;
+}
+
+__device__ __forceinline__ __half safe_hmin_nan(__half a, __half b) {
+    unsigned short a_bits = __half_as_ushort(a);
+    unsigned short b_bits = __half_as_ushort(b);
+    
+    bool a_is_nan = ((a_bits & 0x7C00) == 0x7C00) && (a_bits & 0x03FF);
+    bool b_is_nan = ((b_bits & 0x7C00) == 0x7C00) && (b_bits & 0x03FF);
+    
+    if (a_is_nan) return a;
+    if (b_is_nan) return b;
+    
+    return __hlt(a, b) ? a : b;
+}
+
+// Define the missing functions as macros
+#define __hmax_nan(a, b) safe_hmax_nan(a, b)
+#define __hmin_nan(a, b) safe_hmin_nan(a, b)
+
 // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#atomicadd
 // The 16-bit __half floating-point version of atomicAdd() is only supported by devices of compute capability 7.x and higher.
 // Solution adapted from https://github.com/torch/cutorch/blob/master/lib/THC/THCAtomics.cuh#L96-L119
